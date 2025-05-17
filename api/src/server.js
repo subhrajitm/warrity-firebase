@@ -10,6 +10,7 @@ const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const logger = require('./config/logger');
 const swaggerConfig = require('./config/swagger');
+const functions = require('firebase-functions');
 
 // Load environment variables
 dotenv.config();
@@ -53,20 +54,20 @@ app.use(compression());
 
 // CORS configuration
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  origin: process.env.CORS_ORIGIN || '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true // Changed back to true to allow credentials
+  credentials: true
 };
 app.use(cors(corsOptions));
 
 // Rate limiting
 const apiLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes by default
-  max: parseInt(process.env.RATE_LIMIT_MAX) || 100, // limit each IP to 100 requests per windowMs by default
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_MAX) || 100,
   message: 'Too many requests from this IP, please try again later',
-  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use('/api/', apiLimiter);
 
@@ -76,7 +77,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Logging middleware
 if (process.env.NODE_ENV === 'production') {
-  // Create a write stream for access logs
   const accessLogStream = fs.createWriteStream(
     path.join(logsDir, 'access.log'),
     { flags: 'a' }
@@ -88,7 +88,7 @@ if (process.env.NODE_ENV === 'production') {
 
 // Static files - serve from both /uploads and /api/uploads
 app.use(['/uploads', '/api/uploads'], (req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || 'http://localhost:3000');
+  res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -97,9 +97,9 @@ app.use(['/uploads', '/api/uploads'], (req, res, next) => {
   next();
 }, express.static(path.join(process.cwd(), process.env.UPLOAD_PATH || 'uploads')));
 
-// Serve documents subdirectory - handle both /uploads/documents and /api/uploads/documents
+// Serve documents subdirectory
 app.use(['/uploads/documents', '/api/uploads/documents'], (req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || 'http://localhost:3000');
+  res.setHeader('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -148,10 +148,8 @@ app.use((req, res, next) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  // Log error
   logger.error(`${err.status || 500} - ${err.message} - ${req.originalUrl} - ${req.method} - ${req.ip}`);
   
-  // Log detailed error in production but don't send it to client
   const errorResponse = {
     message: 'Internal Server Error',
     error: process.env.NODE_ENV === 'development' ? err.message : {}
@@ -164,8 +162,8 @@ app.use((err, req, res, next) => {
 const connectDB = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/warrity', {
-      serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
-      socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
     });
     logger.info('MongoDB connected successfully');
   } catch (error) {
@@ -179,37 +177,8 @@ const connectDB = async () => {
   }
 };
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM signal received: closing HTTP server');
-  mongoose.connection.close(() => {
-    logger.info('MongoDB connection closed');
-    process.exit(0);
-  });
-});
+// Initialize MongoDB connection
+connectDB();
 
-// Start server
-const PORT = process.env.PORT || 5000;
-connectDB().then(() => {
-  const server = app.listen(PORT, () => {
-    logger.info(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
-  });
-  
-  // Handle unhandled promise rejections
-  process.on('unhandledRejection', (err) => {
-    logger.error(`UNHANDLED REJECTION! 💥 ${err.name}: ${err.message}`);
-    server.close(() => {
-      process.exit(1);
-    });
-  });
-  
-  // Handle uncaught exceptions
-  process.on('uncaughtException', (err) => {
-    logger.error(`UNCAUGHT EXCEPTION! 💥 ${err.name}: ${err.message}`);
-    server.close(() => {
-      process.exit(1);
-    });
-  });
-});
-
-module.exports = app; // For testing purposes
+// Export the Express app as a Firebase Function
+exports.api = functions.https.onRequest(app);
