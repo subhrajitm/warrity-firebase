@@ -24,10 +24,11 @@ const nextConfig = {
     ],
   },
   async rewrites() {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL}/:path*`,
+        destination: `${apiUrl}/:path*`,
       },
     ]
   },
@@ -36,33 +37,25 @@ const nextConfig = {
     parallelServerBuildTraces: true,
     parallelServerCompiles: true,
   },
-  generateBuildId: async () => {
-    return 'build-' + Date.now()
-  },
+  generateBuildId: () => 'development',
   skipTrailingSlashRedirect: true,
   skipMiddlewareUrlNormalize: true,
+  // Explicitly disable Pages Router
+  pageExtensions: ['tsx', 'ts', 'jsx', 'js'],
 }
 
-mergeConfig(nextConfig, userConfig)
+// Merge configurations
+const finalConfig = {
+  ...nextConfig,
+  ...(userConfig?.default || {}),
+}
 
-function mergeConfig(nextConfig, userConfig) {
-  if (!userConfig) {
-    return
-  }
-
-  for (const key in userConfig) {
-    if (
-      typeof nextConfig[key] === 'object' &&
-      !Array.isArray(nextConfig[key])
-    ) {
-      nextConfig[key] = {
-        ...nextConfig[key],
-        ...userConfig[key],
-      }
-    } else {
-      nextConfig[key] = userConfig[key]
-    }
+// Deep merge experimental config
+if (userConfig?.default?.experimental) {
+  finalConfig.experimental = {
+    ...nextConfig.experimental,
+    ...userConfig.default.experimental,
   }
 }
 
-export default nextConfig
+export default finalConfig
